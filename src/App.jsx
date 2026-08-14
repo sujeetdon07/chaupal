@@ -106,6 +106,10 @@ export default function App() {
         </div>
       )}
       <footer>मन की थकान यहीं रख जाइए।</footer>
+
+      <div className="watermark">
+        Made with <span>♥</span> by Sujeet Kumar
+      </div>
     </main>
   );
 }

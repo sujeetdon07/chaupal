@@ -115,3 +115,22 @@ footer{position:absolute;left:32px;bottom:28px;z-index:8;color:rgba(245,234,212,
   .media-flyout{bottom:calc(100% + 8px);max-height:55vh}.playlist-list{max-height:42vh}
   .theme-tip{display:none}footer{display:none}
 }
+
+.watermark {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.watermark span {
+  font-size: 13px;
+  margin: 0 2px;
+}
