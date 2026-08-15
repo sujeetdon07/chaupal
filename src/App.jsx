@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import Scene from "./components/Scene";
 import YouTubePlayer from "./components/YouTubePlayer";
 import Timer from "./components/Timer";
@@ -110,6 +111,7 @@ export default function App() {
       <div className="watermark">
         Made with <span>♥</span> by Sujeet Kumar
       </div>
+      <SpeedInsights />
     </main>
   );
 }
