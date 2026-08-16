@@ -1,0 +1,40 @@
+{
+  "name": "चौपाल रेडियो",
+  "short_name": "चौपाल",
+  "description": "जहाँ शाम रुकती है, धुनें चलती हैं। गाँव का रेडियो।",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#182019",
+  "theme_color": "#182019",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["music", "entertainment"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Play Music",
+      "short_name": "Play",
+      "description": "Start playing music",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

@@ -2,14 +2,18 @@ import { useState, useEffect, useRef } from "react";
 import { formatTime } from "../hooks/useTimer";
 import { useYouTubePlayer } from "../hooks/useYouTubePlayer";
 
-export default function YouTubePlayer({ song, songs, isPlaying, setIsPlaying, onNext, onPrev, onSelect }) {
+export default function YouTubePlayer({ song, songs, isPlaying, setIsPlaying, onNext, onPrev, onSelect, shuffle, onToggleShuffle }) {
   const [queueOpen, setQueueOpen] = useState(false);
   
   const yt = useYouTubePlayer({
     videoId: song.youtubeId,
     onPlaying: () => setIsPlaying(true),
     onPaused: () => setIsPlaying(false),
-    onEnded: onNext
+    onEnded: onNext,
+    onNext: onNext,
+    onPrev: onPrev,
+    songTitle: song.title,
+    songArtist: song.artist
   });
 
   const toggle = () => {
@@ -131,6 +135,14 @@ export default function YouTubePlayer({ song, songs, isPlaying, setIsPlaying, on
       <div className="player-footer">
         <button className={`queue-button ${queueOpen ? "active" : ""}`} onClick={() => setQueueOpen(v => !v)}>
           <span>☰</span> आज की महफ़िल <b>{songs.length}</b>
+        </button>
+        <button 
+          className={`shuffle-footer-btn ${shuffle ? "active" : ""}`} 
+          onClick={onToggleShuffle} 
+          aria-label="शफल"
+          title="शफल"
+        >
+          🔀
         </button>
         <div className="volume">
           <span>◖</span>

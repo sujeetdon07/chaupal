@@ -14,16 +14,39 @@ export default function App() {
   const [chai, setChai] = useState(false);
   const [welcome, setWelcome] = useState(true);
   const [online, setOnline] = useState(33);
+  const [shuffle, setShuffle] = useState(false);
   const { seconds, running, start, stop } = useTimer();
 
   const song = songs[songIndex];
+  
+  const getRandomIndex = (currentIndex) => {
+    let newIndex;
+    do {
+      newIndex = Math.floor(Math.random() * songs.length);
+    } while (newIndex === currentIndex && songs.length > 1);
+    return newIndex;
+  };
+
   const next = () => {
-    setSongIndex(i => (i + 1) % songs.length);
+    if (shuffle) {
+      setSongIndex(getRandomIndex(songIndex));
+    } else {
+      setSongIndex(i => (i + 1) % songs.length);
+    }
     setIsPlaying(true); // Auto-play next song
   };
+  
   const prev = () => {
-    setSongIndex(i => (i - 1 + songs.length) % songs.length);
+    if (shuffle) {
+      setSongIndex(getRandomIndex(songIndex));
+    } else {
+      setSongIndex(i => (i - 1 + songs.length) % songs.length);
+    }
     setIsPlaying(true); // Auto-play previous song
+  };
+  
+  const toggleShuffle = () => {
+    setShuffle(!shuffle);
   };
 
   useEffect(() => {
@@ -85,6 +108,8 @@ export default function App() {
           onNext={next}
           onPrev={prev}
           onSelect={setSongIndex}
+          shuffle={shuffle}
+          onToggleShuffle={toggleShuffle}
         />
         <Timer seconds={seconds} running={running} start={start} stop={stop} />
       </section>

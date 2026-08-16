@@ -22,7 +22,7 @@ function loadYouTubeAPI() {
   return apiPromise;
 }
 
-export function useYouTubePlayer({ videoId, onPlaying, onPaused, onEnded, onReady }) {
+export function useYouTubePlayer({ videoId, onPlaying, onPaused, onEnded, onReady, onNext, onPrev, songTitle, songArtist }) {
   const hostRef = useRef(null);
   const playerRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -44,8 +44,9 @@ export function useYouTubePlayer({ videoId, onPlaying, onPaused, onEnded, onRead
       if (cancelled || !hostRef.current) return;
 
       if (playerRef.current) {
-        playerRef.current.destroy();
-        playerRef.current = null;
+        // If player already exists, just load the new video
+        playerRef.current.loadVideoById(videoId);
+        return;
       }
 
       playerRef.current = new YT.Player(hostRef.current, {
@@ -66,11 +67,50 @@ export function useYouTubePlayer({ videoId, onPlaying, onPaused, onEnded, onRead
               setReady(true);
               setDuration(event.target.getDuration() || 0);
               onReady?.(event.target);
+              
+              // Setup Media Session API for background playback and lock screen controls
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                  title: songTitle || 'Unknown',
+                  artist: songArtist || 'Unknown Artist',
+                  album: 'चौपाल रेडियो',
+                  artwork: [
+                    { src: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
+                    { src: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
+                  ]
+                });
+
+                navigator.mediaSession.setActionHandler('play', () => {
+                  event.target.playVideo();
+                });
+
+                navigator.mediaSession.setActionHandler('pause', () => {
+                  event.target.pauseVideo();
+                });
+
+                navigator.mediaSession.setActionHandler('previoustrack', () => {
+                  onPrev?.();
+                });
+
+                navigator.mediaSession.setActionHandler('nexttrack', () => {
+                  onNext?.();
+                });
+              }
             }, 100);
           },
           onStateChange: event => {
-            if (event.data === YT.PlayerState.PLAYING) onPlaying?.();
-            if (event.data === YT.PlayerState.PAUSED) onPaused?.();
+            if (event.data === YT.PlayerState.PLAYING) {
+              onPlaying?.();
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+              }
+            }
+            if (event.data === YT.PlayerState.PAUSED) {
+              onPaused?.();
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+              }
+            }
             if (event.data === YT.PlayerState.ENDED) onEnded?.();
           },
           onError: event => {
@@ -89,11 +129,36 @@ export function useYouTubePlayer({ videoId, onPlaying, onPaused, onEnded, onRead
     };
   }, [videoId]);
 
+  // Update Media Session metadata when song changes
+  useEffect(() => {
+    if ('mediaSession' in navigator && songTitle && songArtist) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: songTitle || 'Unknown',
+        artist: songArtist || 'Unknown Artist',
+        album: 'चौपाल रेडियो',
+        artwork: [
+          { src: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
+          { src: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
+        ]
+      });
+    }
+  }, [songTitle, songArtist, videoId]);
+
   useEffect(() => {
     const id = setInterval(() => {
       if (playerRef.current?.getCurrentTime) {
-        setCurrentTime(playerRef.current.getCurrentTime() || 0);
+        const currentTime = playerRef.current.getCurrentTime() || 0;
+        setCurrentTime(currentTime);
         setDuration(playerRef.current.getDuration() || duration);
+        
+        // Update Media Session playback position
+        if ('mediaSession' in navigator && duration > 0) {
+          navigator.mediaSession.setPositionState({
+            duration: duration,
+            playbackRate: 1,
+            position: currentTime
+          });
+        }
       }
     }, 500);
     return () => clearInterval(id);
