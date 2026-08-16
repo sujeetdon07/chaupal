@@ -36,5 +36,9 @@
         }
       ]
     }
-  ]
+  ],
+  "background_sync": {
+    "name": "keep-alive",
+    "min_period": 30000
+  }
 }
