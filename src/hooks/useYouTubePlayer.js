@@ -47,7 +47,7 @@ export function useYouTubePlayer({
   const currentVideoIdRef = useRef(videoId);
   const pendingVideoIdRef = useRef(videoId);
   const skipTimeoutRef = useRef(null);
-
+  const wakeLockRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [isPlayingState, setIsPlayingState] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -194,6 +194,14 @@ export function useYouTubePlayer({
               if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'playing';
               }
+              // Request screen wake lock to prevent screen from turning off
+              if ('wakeLock' in navigator) {
+                navigator.wakeLock.request('screen').then(lock => {
+                  wakeLockRef.current = lock;
+                }).catch(err => {
+                  console.log('Wake Lock error:', err);
+                });
+              }
               callbacksRef.current.onPlaying?.();
             } else if (event.data === YT.PlayerState.PAUSED) {
               isPlayingRef.current = false;
@@ -201,12 +209,22 @@ export function useYouTubePlayer({
               if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'paused';
               }
+              // Release wake lock when paused
+              if (wakeLockRef.current) {
+                wakeLockRef.current.release();
+                wakeLockRef.current = null;
+              }
               callbacksRef.current.onPaused?.();
             } else if (event.data === YT.PlayerState.ENDED) {
               isPlayingRef.current = false;
               setIsPlayingState(false);
               if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'none';
+              }
+              // Release wake lock when ended
+              if (wakeLockRef.current) {
+                wakeLockRef.current.release();
+                wakeLockRef.current = null;
               }
               callbacksRef.current.onEnded?.();
             }
@@ -246,6 +264,11 @@ export function useYouTubePlayer({
       }
       if (containerRef.current) {
         containerRef.current.innerHTML = "";
+      }
+      // Release wake lock on cleanup
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
       }
     };
   }, []); // Mounts once and lives across songs!
@@ -362,6 +385,30 @@ export function useYouTubePlayer({
     } catch (e) {
       console.warn("Volume call failed:", e);
     }
+  }, []);
+
+  // Handle page visibility changes for background playback
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Page is hidden (went to background)
+        console.log('Page went to background');
+        // Keep playing - don't pause
+      } else if (document.visibilityState === 'visible') {
+        // Page is visible again
+        console.log('Page came to foreground');
+        // Ensure player is still in correct state
+        if (playerRef.current && playerRef.current.getPlayerState) {
+          const state = playerRef.current.getPlayerState();
+          console.log('Player state:', state);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   return {
