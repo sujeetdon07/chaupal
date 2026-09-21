@@ -1,211 +1,378 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
-let apiPromise;
+let apiPromise = null;
 
 function loadYouTubeAPI() {
-  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (typeof window !== "undefined" && window.YT?.Player) {
+    return Promise.resolve(window.YT);
+  }
   if (apiPromise) return apiPromise;
 
-  apiPromise = new Promise(resolve => {
+  apiPromise = new Promise((resolve) => {
     const previous = window.onYouTubeIframeAPIReady;
     window.onYouTubeIframeAPIReady = () => {
       previous?.();
       resolve(window.YT);
     };
 
-    const script = document.createElement("script");
-    script.src = "https://www.youtube.com/iframe_api";
-    script.async = true;
-    document.head.appendChild(script);
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      document.head.appendChild(script);
+    }
   });
 
   return apiPromise;
 }
 
-export function useYouTubePlayer({ videoId, onPlaying, onPaused, onEnded, onReady, onNext, onPrev, songTitle, songArtist }) {
-  const hostRef = useRef(null);
+export function useYouTubePlayer({
+  videoId,
+  autoPlay = false,
+  initialVolume = 0.72,
+  onPlaying,
+  onPaused,
+  onEnded,
+  onReady,
+  onNext,
+  onPrev,
+  onError,
+  songTitle,
+  songArtist
+}) {
+  const containerRef = useRef(null);
   const playerRef = useRef(null);
+  const isPlayingRef = useRef(false);
+  const isReadyRef = useRef(false);
+  const currentVideoIdRef = useRef(videoId);
+  const pendingVideoIdRef = useRef(videoId);
+  const skipTimeoutRef = useRef(null);
+
   const [ready, setReady] = useState(false);
+  const [isPlayingState, setIsPlayingState] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState("");
 
+  // Store latest callbacks in ref to avoid stale closures
+  const callbacksRef = useRef({
+    onPlaying,
+    onPaused,
+    onEnded,
+    onReady,
+    onNext,
+    onPrev,
+    onError
+  });
+
   useEffect(() => {
-    let cancelled = false;
+    callbacksRef.current = {
+      onPlaying,
+      onPaused,
+      onEnded,
+      onReady,
+      onNext,
+      onPrev,
+      onError
+    };
+  });
 
-    if (!videoId) {
-      setReady(false);
-      setError("इस गीत के लिए YouTube Video ID अभी नहीं जोड़ी गई है।");
-      return;
-    }
+  // Keep track of desired videoId
+  useEffect(() => {
+    pendingVideoIdRef.current = videoId;
+  }, [videoId]);
 
-    setError("");
-    loadYouTubeAPI().then(YT => {
-      if (cancelled || !hostRef.current) return;
+  // Setup MediaSession Metadata & Handlers
+  const updateMediaSession = useCallback((title, artist, vid) => {
+    if (typeof navigator === "undefined" || !('mediaSession' in navigator)) return;
 
-      if (playerRef.current) {
-        // If player already exists, just load the new video
-        playerRef.current.loadVideoById(videoId);
-        return;
+    try {
+      if (title && vid) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: title || 'चौपाल रेडियो',
+          artist: artist || 'गाँव की महफ़िल',
+          album: 'चौपाल रेडियो',
+          artwork: [
+            { src: `https://img.youtube.com/vi/${vid}/mqdefault.jpg`, sizes: '320x180', type: 'image/jpeg' },
+            { src: `https://img.youtube.com/vi/${vid}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' }
+          ]
+        });
       }
 
-      playerRef.current = new YT.Player(hostRef.current, {
-        width: "200",
-        height: "200",
-        videoId,
+      navigator.mediaSession.setActionHandler('play', () => {
+        try {
+          playerRef.current?.playVideo();
+        } catch (_) {}
+      });
+
+      navigator.mediaSession.setActionHandler('pause', () => {
+        try {
+          playerRef.current?.pauseVideo();
+        } catch (_) {}
+      });
+
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        callbacksRef.current.onPrev?.();
+      });
+
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        callbacksRef.current.onNext?.();
+      });
+    } catch (e) {
+      console.warn('MediaSession init error:', e);
+    }
+  }, []);
+
+  // Update Media Session when track changes
+  useEffect(() => {
+    updateMediaSession(songTitle, songArtist, videoId);
+  }, [songTitle, songArtist, videoId, updateMediaSession]);
+
+  // Initialize YouTube Player ONCE
+  useEffect(() => {
+    let unmounted = false;
+    let pollInterval = null;
+
+    if (!containerRef.current) return;
+
+    loadYouTubeAPI().then((YT) => {
+      if (unmounted || !containerRef.current || playerRef.current) return;
+
+      // Create an internal div to be replaced by the iframe
+      const mountNode = document.createElement("div");
+      containerRef.current.appendChild(mountNode);
+
+      const player = new YT.Player(mountNode, {
+        width: "100%",
+        height: "100%",
+        videoId: pendingVideoIdRef.current || videoId || "",
         playerVars: {
           playsinline: 1,
           controls: 0,
           rel: 0,
           modestbranding: 1,
-          origin: window.location.origin
+          origin: window.location.origin,
+          disablekb: 1,
+          iv_load_policy: 3
         },
         events: {
-          onReady: event => {
-            // Add small delay to ensure player is truly ready
-            setTimeout(() => {
-              setReady(true);
-              setDuration(event.target.getDuration() || 0);
-              onReady?.(event.target);
-              
-              // Setup Media Session API for background playback and lock screen controls
-              if ('mediaSession' in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                  title: songTitle || 'Unknown',
-                  artist: songArtist || 'Unknown Artist',
-                  album: 'चौपाल रेडियो',
-                  artwork: [
-                    { src: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
-                    { src: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
-                  ]
-                });
+          onReady: (event) => {
+            if (unmounted) return;
+            playerRef.current = event.target;
+            isReadyRef.current = true;
+            currentVideoIdRef.current = pendingVideoIdRef.current;
 
-                navigator.mediaSession.setActionHandler('play', () => {
-                  event.target.playVideo();
-                });
+            // Set initial volume immediately
+            try {
+              event.target.setVolume(Math.round(initialVolume * 100));
+            } catch (_) {}
 
-                navigator.mediaSession.setActionHandler('pause', () => {
-                  event.target.pauseVideo();
-                });
+            setReady(true);
+            const d = event.target.getDuration() || 0;
+            setDuration(d);
 
-                navigator.mediaSession.setActionHandler('previoustrack', () => {
-                  onPrev?.();
-                });
+            callbacksRef.current.onReady?.(event.target);
 
-                navigator.mediaSession.setActionHandler('nexttrack', () => {
-                  onNext?.();
-                });
-              }
-            }, 100);
+            // If a different video was requested while initializing, load it
+            if (pendingVideoIdRef.current && pendingVideoIdRef.current !== videoId) {
+              event.target.loadVideoById(pendingVideoIdRef.current);
+            } else if (autoPlay) {
+              event.target.playVideo();
+            }
           },
-          onStateChange: event => {
+          onStateChange: (event) => {
+            if (unmounted) return;
+
             if (event.data === YT.PlayerState.PLAYING) {
-              onPlaying?.();
+              isPlayingRef.current = true;
+              setIsPlayingState(true);
+              setError("");
+              if (skipTimeoutRef.current) {
+                clearTimeout(skipTimeoutRef.current);
+                skipTimeoutRef.current = null;
+              }
               if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'playing';
               }
-            }
-            if (event.data === YT.PlayerState.PAUSED) {
-              onPaused?.();
+              callbacksRef.current.onPlaying?.();
+            } else if (event.data === YT.PlayerState.PAUSED) {
+              isPlayingRef.current = false;
+              setIsPlayingState(false);
               if ('mediaSession' in navigator) {
                 navigator.mediaSession.playbackState = 'paused';
               }
+              callbacksRef.current.onPaused?.();
+            } else if (event.data === YT.PlayerState.ENDED) {
+              isPlayingRef.current = false;
+              setIsPlayingState(false);
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'none';
+              }
+              callbacksRef.current.onEnded?.();
             }
-            if (event.data === YT.PlayerState.ENDED) onEnded?.();
           },
-          onError: event => {
-            setError(`YouTube player error (${event.data}). Check the video ID/embed availability.`);
+          onError: (event) => {
+            if (unmounted) return;
+            const code = event.data;
+            let msg = `धुन लोड नहीं हो सकी (${code})`;
+            if (code === 100 || code === 101 || code === 150) {
+              msg = "यह धुन इस समय उपलब्ध नहीं है, अगली धुन शुरू हो रही है...";
+            }
+            setError(msg);
+            callbacksRef.current.onError?.(code);
+
+            // Auto advance on unplayable video
+            if (code === 100 || code === 101 || code === 150 || code === 2) {
+              if (skipTimeoutRef.current) clearTimeout(skipTimeoutRef.current);
+              skipTimeoutRef.current = setTimeout(() => {
+                callbacksRef.current.onNext?.();
+              }, 1800);
+            }
           }
         }
       });
     });
 
     return () => {
-      cancelled = true;
+      unmounted = true;
+      if (skipTimeoutRef.current) clearTimeout(skipTimeoutRef.current);
+      if (pollInterval) clearInterval(pollInterval);
       if (playerRef.current) {
-        playerRef.current.destroy();
+        try {
+          playerRef.current.destroy();
+        } catch (_) {}
         playerRef.current = null;
+        isReadyRef.current = false;
+      }
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
       }
     };
-  }, [videoId]);
+  }, []); // Mounts once and lives across songs!
 
-  // Update Media Session metadata when song changes
+  // Handle videoId switching seamlessly WITHOUT destroying player
   useEffect(() => {
-    if ('mediaSession' in navigator && songTitle && songArtist) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: songTitle || 'Unknown',
-        artist: songArtist || 'Unknown Artist',
-        album: 'चौपाल रेडियो',
-        artwork: [
-          { src: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
-          { src: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
-        ]
-      });
+    if (!videoId) {
+      setError("YouTube ID अनुपलब्ध है");
+      return;
     }
-  }, [songTitle, songArtist, videoId]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (playerRef.current?.getCurrentTime) {
-        const currentTime = playerRef.current.getCurrentTime() || 0;
-        setCurrentTime(currentTime);
-        setDuration(playerRef.current.getDuration() || duration);
-        
-        // Update Media Session playback position
-        if ('mediaSession' in navigator && duration > 0) {
-          navigator.mediaSession.setPositionState({
-            duration: duration,
-            playbackRate: 1,
-            position: currentTime
-          });
+    if (skipTimeoutRef.current) {
+      clearTimeout(skipTimeoutRef.current);
+      skipTimeoutRef.current = null;
+    }
+    setError("");
+    setCurrentTime(0);
+
+    if (playerRef.current && isReadyRef.current) {
+      if (currentVideoIdRef.current !== videoId) {
+        currentVideoIdRef.current = videoId;
+        try {
+          // If already playing or should autoplay, load and play
+          if (isPlayingRef.current) {
+            playerRef.current.loadVideoById(videoId);
+          } else {
+            // Load and play immediately for smooth transitions
+            playerRef.current.loadVideoById(videoId);
+          }
+        } catch (e) {
+          console.warn("Video load error:", e);
         }
       }
-    }, 500);
-    return () => clearInterval(id);
-  }, [duration]);
+    }
+  }, [videoId]);
+
+  // Efficient progress polling ONLY when playing
+  useEffect(() => {
+    if (!isPlayingState) return;
+
+    const interval = setInterval(() => {
+      if (playerRef.current && typeof playerRef.current.getCurrentTime === "function") {
+        try {
+          const cur = playerRef.current.getCurrentTime() || 0;
+          const dur = playerRef.current.getDuration() || 0;
+
+          setCurrentTime(cur);
+          if (dur > 0) setDuration(dur);
+
+          // Safe MediaSession position state update
+          if (
+            'mediaSession' in navigator &&
+            typeof navigator.mediaSession.setPositionState === 'function' &&
+            Number.isFinite(dur) &&
+            Number.isFinite(cur) &&
+            dur > 0 &&
+            cur >= 0 &&
+            cur <= dur
+          ) {
+            try {
+              navigator.mediaSession.setPositionState({
+                duration: dur,
+                playbackRate: 1,
+                position: cur
+              });
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+    }, 450);
+
+    return () => clearInterval(interval);
+  }, [isPlayingState]);
+
+  // Stable memoized control methods
+  const play = useCallback(() => {
+    try {
+      if (playerRef.current && typeof playerRef.current.playVideo === "function") {
+        playerRef.current.playVideo();
+      }
+    } catch (e) {
+      console.warn("Play call failed:", e);
+    }
+  }, []);
+
+  const pause = useCallback(() => {
+    try {
+      if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
+        playerRef.current.pauseVideo();
+      }
+    } catch (e) {
+      console.warn("Pause call failed:", e);
+    }
+  }, []);
+
+  const seek = useCallback((value) => {
+    try {
+      const num = Number(value);
+      if (Number.isFinite(num) && playerRef.current && typeof playerRef.current.seekTo === "function") {
+        playerRef.current.seekTo(num, true);
+        setCurrentTime(num);
+      }
+    } catch (e) {
+      console.warn("Seek call failed:", e);
+    }
+  }, []);
+
+  const volume = useCallback((value) => {
+    try {
+      const vol = Math.max(0, Math.min(100, Math.round(Number(value) * 100)));
+      if (playerRef.current && typeof playerRef.current.setVolume === "function") {
+        playerRef.current.setVolume(vol);
+      }
+    } catch (e) {
+      console.warn("Volume call failed:", e);
+    }
+  }, []);
 
   return {
-    hostRef,
-    player: playerRef,
+    hostRef: containerRef,
     ready,
     duration,
     currentTime,
     error,
-    play: () => {
-      try {
-        if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
-          playerRef.current.playVideo();
-        }
-      } catch (e) {
-        console.error('Play error:', e);
-      }
-    },
-    pause: () => {
-      try {
-        if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
-          playerRef.current.pauseVideo();
-        }
-      } catch (e) {
-        console.error('Pause error:', e);
-      }
-    },
-    seek: value => {
-      try {
-        if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
-          playerRef.current.seekTo(Number(value), true);
-        }
-      } catch (e) {
-        console.error('Seek error:', e);
-      }
-    },
-    volume: value => {
-      try {
-        if (playerRef.current && typeof playerRef.current.setVolume === 'function') {
-          playerRef.current.setVolume(Math.round(Number(value) * 100));
-        }
-      } catch (e) {
-        console.error('Volume error:', e);
-      }
-    }
+    play,
+    pause,
+    seek,
+    volume
   };
 }
